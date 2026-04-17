@@ -1,0 +1,810 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dashboard de suivi du recouvrement</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#f1f5f9;--surface:#fff;--surface2:#f8fafc;--border:#e2e8f0;
+  --accent:#0ea5e9;--accent2:#7c3aed;--accent3:#f59e0b;--accent4:#10b981;--accent5:#f43f5e;
+  --text:#0f172a;--muted:#64748b;--muted2:#94a3b8;
+}
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;min-height:100vh;}
+
+/* ── UPLOAD ── */
+#uploadOverlay{
+  position:fixed;inset:0;z-index:999;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  background:radial-gradient(ellipse at 30% 30%,rgba(14,165,233,.08) 0%,transparent 60%),
+             radial-gradient(ellipse at 70% 70%,rgba(124,58,237,.06) 0%,transparent 60%),#f1f5f9;
+  transition:opacity .4s;
+}
+#uploadOverlay.hidden{opacity:0;pointer-events:none;}
+.ulogo{font-family:'Syne',sans-serif;font-size:26px;font-weight:800;margin-bottom:6px;letter-spacing:-.5px;}
+.ulogo span{color:var(--accent);}
+.usub{color:var(--muted);font-size:12px;margin-bottom:36px;letter-spacing:1.5px;text-transform:uppercase;}
+.dropzone{
+  width:100%;max-width:480px;border:2px dashed rgba(14,165,233,.35);
+  border-radius:18px;padding:48px 36px;text-align:center;cursor:pointer;
+  background:rgba(14,165,233,.025);transition:all .25s;position:relative;overflow:hidden;
+}
+.dropzone.over{border-color:var(--accent);background:rgba(14,165,233,.07);transform:scale(1.01);}
+.dropzone input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%;}
+.dicon{font-size:48px;margin-bottom:12px;display:block;}
+.dtitle{font-family:'Syne',sans-serif;font-size:18px;font-weight:700;margin-bottom:8px;}
+.dhint{color:var(--muted);font-size:12px;line-height:1.8;}
+.dhint strong{color:var(--accent);}
+.prog-wrap{width:100%;max-width:480px;height:3px;background:#e2e8f0;border-radius:2px;margin-top:20px;overflow:hidden;display:none;}
+.prog-fill{height:100%;width:0;background:linear-gradient(90deg,var(--accent),var(--accent2));border-radius:2px;transition:width .4s;}
+.prog-lbl{margin-top:8px;font-size:11px;color:var(--muted);display:none;}
+.uspecs{margin-top:28px;display:flex;gap:12px;flex-wrap:wrap;justify-content:center;}
+.uspec{background:#fff;border:1px solid var(--border);border-radius:9px;padding:9px 14px;font-size:11px;color:var(--muted);display:flex;align-items:center;gap:6px;}
+
+/* ── LAYOUT ── */
+header{background:#fff;border-bottom:1px solid var(--border);padding:12px 28px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100;box-shadow:0 1px 6px rgba(0,0,0,.06);}
+.logo{display:flex;align-items:center;gap:10px;}
+.logo-icon{width:32px;height:32px;background:linear-gradient(135deg,var(--accent),var(--accent2));border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:15px;}
+.logo-text h1{font-family:'Syne',sans-serif;font-size:15px;font-weight:800;line-height:1.2;}
+.logo-text span{font-size:10px;color:var(--muted);}
+.hright{display:flex;align-items:center;gap:8px;}
+.hbadge{background:rgba(14,165,233,.1);border:1px solid rgba(14,165,233,.3);color:var(--accent);padding:4px 11px;border-radius:14px;font-size:11px;font-weight:500;}
+.hbtn{display:flex;align-items:center;gap:5px;background:var(--surface2);border:1px solid var(--border);color:var(--muted);padding:6px 12px;border-radius:7px;font-family:'DM Sans',sans-serif;font-size:11px;font-weight:500;cursor:pointer;transition:all .2s;}
+.hbtn:hover{border-color:rgba(14,165,233,.4);color:var(--accent);background:rgba(14,165,233,.05);}
+.hbtn.update-btn{border-color:rgba(14,165,233,.4);color:var(--accent);background:rgba(14,165,233,.07);}
+.hbtn.update-btn:hover{background:rgba(14,165,233,.14);}
+
+nav{background:#fff;border-bottom:1px solid var(--border);padding:0 28px;display:flex;gap:0;overflow-x:auto;}
+.nbtn{background:none;border:none;cursor:pointer;color:var(--muted);font-family:'DM Sans',sans-serif;font-size:12px;font-weight:500;padding:12px 16px;border-bottom:2px solid transparent;transition:all .2s;white-space:nowrap;}
+.nbtn.active{color:var(--accent);border-bottom-color:var(--accent);}
+.nbtn:hover:not(.active){color:var(--text);}
+
+/* ── GLOBAL FILTER BAR ── */
+.gfilter-bar{background:#fff;border-bottom:1px solid var(--border);padding:10px 28px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+.gf-label{font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.8px;}
+.gf-btn{background:var(--surface2);border:1px solid var(--border);color:var(--muted);padding:5px 13px;border-radius:6px;font-family:'DM Sans',sans-serif;font-size:11px;cursor:pointer;transition:all .2s;}
+.gf-btn.active{background:rgba(14,165,233,.12);border-color:var(--accent);color:var(--accent);font-weight:600;}
+.gf-btn:hover:not(.active){border-color:var(--muted2);color:var(--text);}
+
+.content{padding:22px 28px;max-width:1600px;margin:0 auto;}
+.page{display:none;}.page.active{display:block;animation:fadein .3s ease;}
+@keyframes fadein{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+
+/* ── KPI GRID ── */
+.kgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px;}
+.kgrid.six{grid-template-columns:repeat(6,1fr);}
+.kcard{background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px;position:relative;overflow:hidden;transition:transform .2s,box-shadow .2s;}
+.kcard:hover{transform:translateY(-1px);box-shadow:0 4px 16px rgba(0,0,0,.07);}
+.kcard::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;}
+.kcard.c1::before{background:linear-gradient(90deg,var(--accent),transparent);}
+.kcard.c2::before{background:linear-gradient(90deg,var(--accent2),transparent);}
+.kcard.c3::before{background:linear-gradient(90deg,var(--accent3),transparent);}
+.kcard.c4::before{background:linear-gradient(90deg,var(--accent4),transparent);}
+.kcard.c5::before{background:linear-gradient(90deg,var(--accent5),transparent);}
+.kcard.c6::before{background:linear-gradient(90deg,#8b5cf6,transparent);}
+.klbl{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1.2px;margin-bottom:8px;}
+.kval{font-family:'Syne',sans-serif;font-size:22px;font-weight:800;line-height:1;}
+.ksub{font-size:10px;color:var(--muted);margin-top:4px;}
+.kicon{position:absolute;top:12px;right:12px;font-size:20px;opacity:.1;}
+.ktrend{display:inline-flex;align-items:center;gap:2px;font-size:10px;margin-top:6px;padding:2px 6px;border-radius:8px;}
+.ktrend.up{background:rgba(16,185,129,.12);color:var(--accent4);}
+.ktrend.dn{background:rgba(244,63,94,.12);color:var(--accent5);}
+
+/* ── CHARTS ── */
+.crow{display:grid;gap:14px;margin-bottom:14px;}
+.crow.two{grid-template-columns:1.5fr 1fr;}
+.crow.half{grid-template-columns:1fr 1fr;}
+.crow.third{grid-template-columns:1fr 1fr 1fr;}
+.crow.full{grid-template-columns:1fr;}
+.ccard{background:#fff;border:1px solid var(--border);border-radius:12px;padding:18px;transition:box-shadow .2s;}
+.ccard:hover{box-shadow:0 2px 12px rgba(0,0,0,.07);}
+.ch{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:14px;gap:8px;}
+.ct{font-family:'Syne',sans-serif;font-size:13px;font-weight:700;}
+.cs{font-size:10px;color:var(--muted);margin-top:2px;}
+.cbadge{font-size:10px;padding:3px 8px;border-radius:6px;background:rgba(14,165,233,.1);color:var(--accent);border:1px solid rgba(14,165,233,.2);white-space:nowrap;flex-shrink:0;}
+.cbadge.amber{background:rgba(245,158,11,.1);color:var(--accent3);border-color:rgba(245,158,11,.2);}
+.cbadge.green{background:rgba(16,185,129,.1);color:var(--accent4);border-color:rgba(16,185,129,.2);}
+.cbadge.red{background:rgba(244,63,94,.1);color:var(--accent5);border-color:rgba(244,63,94,.2);}
+
+/* ── SECTION TITLE ── */
+.stitle{font-family:'Syne',sans-serif;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:2px;color:var(--muted);margin-bottom:12px;display:flex;align-items:center;gap:10px;}
+.stitle::after{content:'';flex:1;height:1px;background:var(--border);}
+
+/* ── TABLE ── */
+.tscroll{overflow-x:auto;}
+table{width:100%;border-collapse:collapse;font-size:11.5px;}
+thead tr{border-bottom:2px solid var(--border);}
+thead th{padding:8px 12px;text-align:left;color:var(--muted);font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:.8px;white-space:nowrap;}
+tbody tr{border-bottom:1px solid rgba(0,0,0,.04);transition:background .15s;cursor:default;}
+tbody tr:hover{background:rgba(14,165,233,.04);}
+tbody td{padding:8px 12px;white-space:nowrap;}
+.barmini{height:3px;border-radius:2px;background:linear-gradient(90deg,var(--accent),var(--accent2));display:inline-block;vertical-align:middle;}
+.rnk{width:20px;height:20px;border-radius:4px;display:inline-flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;}
+.r1{background:rgba(245,158,11,.18);color:#d97706;}
+.r2{background:rgba(148,163,184,.15);color:#475569;}
+.r3{background:rgba(180,120,80,.15);color:#92400e;}
+.rn{background:rgba(0,0,0,.05);color:var(--muted);}
+.chip{display:inline-block;padding:2px 7px;border-radius:5px;font-size:10px;font-weight:600;}
+.chip-green{background:rgba(16,185,129,.12);color:#059669;}
+.chip-amber{background:rgba(245,158,11,.12);color:#d97706;}
+.chip-red{background:rgba(244,63,94,.12);color:#dc2626;}
+.chip-blue{background:rgba(14,165,233,.12);color:#0284c7;}
+
+/* ── SELECTS / FILTERS ── */
+select{background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:5px 10px;border-radius:6px;font-family:'DM Sans',sans-serif;font-size:11px;cursor:pointer;outline:none;}
+select:focus{border-color:var(--accent);}
+select option{background:#fff;}
+.frow{display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap;}
+.flbl{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.8px;font-weight:600;}
+
+/* ── TOAST ── */
+.toast{position:fixed;bottom:18px;right:18px;z-index:9999;background:#fff5f5;border:1px solid var(--accent5);border-radius:9px;padding:10px 16px;font-size:12px;color:var(--accent5);display:none;box-shadow:0 4px 16px rgba(0,0,0,.12);}
+
+::-webkit-scrollbar{width:5px;height:5px;}
+::-webkit-scrollbar-track{background:var(--bg);}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px;}
+</style>
+</head>
+<body>
+
+<!-- ══ UPLOAD OVERLAY ══ -->
+<div id="uploadOverlay">
+  <div class="ulogo">Suivi du <span>Recouvrement</span></div>
+  <div class="usub">Chargez votre fichier Balance.xlsx pour démarrer</div>
+  <div class="dropzone" id="dz">
+    <input type="file" id="fi" accept=".xlsx,.xls">
+    <span class="dicon">📂</span>
+    <div class="dtitle">Déposez votre fichier ici</div>
+    <div class="dhint">Glissez-déposez ou cliquez pour parcourir<br>Feuille <strong>Export</strong> · Format .xlsx ou .xls</div>
+  </div>
+  <div class="prog-wrap" id="pw"><div class="prog-fill" id="pf"></div></div>
+  <div class="prog-lbl" id="pl"></div>
+  <div class="uspecs">
+    <div class="uspec"><span>📋</span> Feuille "Export" requise</div>
+    <div class="uspec"><span>🔒</span> 100% local</div>
+    <div class="uspec"><span>⚡</span> Mise à jour instantanée</div>
+  </div>
+</div>
+
+<!-- ══ DASHBOARD ══ -->
+<div id="dash" style="display:none">
+  <header>
+    <div class="logo">
+      <div class="logo-icon">📊</div>
+      <div class="logo-text">
+        <h1>Dashboard de suivi du recouvrement</h1>
+        <span id="hfile">—</span>
+      </div>
+    </div>
+    <div class="hright">
+      <div class="hbadge" id="hbadge">—</div>
+      <button class="hbtn update-btn" id="updateBtn" onclick="triggerUpdate()">↑ Mettre à jour</button>
+      <input type="file" id="fi2" accept=".xlsx,.xls" style="display:none">
+    </div>
+  </header>
+
+  <nav>
+    <button class="nbtn active" onclick="P('overview')">Vue d'ensemble</button>
+    <button class="nbtn" onclick="P('recouvrement')">Recouvrement</button>
+    <button class="nbtn" onclick="P('activite')">Par Activité</button>
+    <button class="nbtn" onclick="P('delais')">Délais de règlement</button>
+    <button class="nbtn" onclick="P('clients')">Top Clients</button>
+  </nav>
+
+  <!-- Global activity filter -->
+  <div class="gfilter-bar">
+    <span class="gf-label">Activité :</span>
+    <button class="gf-btn active" onclick="setActFilter('ALL',this)">Toutes</button>
+    <button class="gf-btn" onclick="setActFilter('DIGITAL',this)">Digital</button>
+    <button class="gf-btn" onclick="setActFilter('PROD',this)">Prod</button>
+    <button class="gf-btn" onclick="setActFilter('CONSULTING',this)">Consulting</button>
+    <button class="gf-btn" onclick="setActFilter('RUN SERVICES',this)">Run Services</button>
+    <button class="gf-btn" onclick="setActFilter('HOSTING',this)">Hosting</button>
+    <button class="gf-btn" onclick="setActFilter('AUTRES PRODUITS',this)">Autres Produits</button>
+    <button class="gf-btn" onclick="setActFilter('FORMATION',this)">Formation</button>
+  </div>
+
+  <!-- ══ PAGE 1: VUE D'ENSEMBLE ══ -->
+  <div id="p-overview" class="page active content">
+    <div class="kgrid" id="kpi-overview"></div>
+    <div class="crow two">
+      <div class="ccard">
+        <div class="ch"><div><div class="ct">CA vs Balance client par année</div><div class="cs">Analyse comparative — TND</div></div><div class="cbadge" id="b-cabal">—</div></div>
+        <canvas id="ch-cabal" height="200"></canvas>
+      </div>
+      <div class="ccard">
+        <div class="ch"><div><div class="ct">Taux de recouvrement</div><div class="cs">Évolution annuelle %</div></div></div>
+        <canvas id="ch-taux" height="200"></canvas>
+      </div>
+    </div>
+    <div class="crow half">
+      <div class="ccard">
+        <div class="ch"><div><div class="ct">Répartition par activité</div><div class="cs">Balance client actuelle</div></div></div>
+        <canvas id="ch-balact" height="200"></canvas>
+      </div>
+      <div class="ccard">
+        <div class="ch"><div><div class="ct">Reste à payer par activité</div><div class="cs">Montant non recouvré (TND)</div></div></div>
+        <canvas id="ch-reste" height="200"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ PAGE 2: RECOUVREMENT ══ -->
+  <div id="p-recouvrement" class="page content">
+    <div class="stitle">Indicateurs de recouvrement</div>
+    <div class="kgrid six" id="kpi-rec"></div>
+    <div class="crow two">
+      <div class="ccard">
+        <div class="ch"><div><div class="ct">Statut de paiement par année</div><div class="cs">Montants TTC empilés</div></div></div>
+        <canvas id="ch-pay" height="210"></canvas>
+      </div>
+      <div class="ccard">
+        <div class="ch"><div><div class="ct">Balance vs Recouvré par année</div><div class="cs">Évolution du reste à recouvrer</div></div></div>
+        <canvas id="ch-balyr" height="210"></canvas>
+      </div>
+    </div>
+    <div class="crow full">
+      <div class="ccard">
+        <div class="ch"><div><div class="ct">CA vs Balance — Par activité</div><div class="cs">Comparaison du chiffre d'affaires avec la balance client</div></div><div class="cbadge amber">Analyse comparative</div></div>
+        <canvas id="ch-cabalact" height="130"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ PAGE 3: PAR ACTIVITÉ ══ -->
+  <div id="p-activite" class="page content">
+    <div class="stitle">Indicateurs par ligne d'activité</div>
+    <div class="ccard" style="margin-bottom:14px">
+      <div class="ch"><div><div class="ct">Tableau de bord — Activités</div><div class="cs">Balance · Délais · Taux de recouvrement</div></div></div>
+      <div class="tscroll"><table id="t-actdetail">
+        <thead><tr><th>Activité</th><th>CA (TND)</th><th>Balance (TND)</th><th>Recouvré (TND)</th><th>Taux Rec.</th><th>Reste à Payer</th><th>Nb Fact.</th><th>Délai Global (j)</th><th>Délai F. Non Réglées (j)</th><th>Délai F. Réglées (j)</th></tr></thead>
+        <tbody id="tb-actdetail"></tbody>
+      </table></div>
+    </div>
+    <div class="crow third">
+      <div class="ccard">
+        <div class="ch"><div><div class="ct">Délai global moyen</div><div class="cs">Par activité (jours)</div></div><div class="cbadge">Recouvrement global</div></div>
+        <canvas id="ch-d1" height="220"></canvas>
+      </div>
+      <div class="ccard">
+        <div class="ch"><div><div class="ct">Délai — F. Non réglées</div><div class="cs">Par activité (jours)</div></div><div class="cbadge red">Factures en attente</div></div>
+        <canvas id="ch-d2" height="220"></canvas>
+      </div>
+      <div class="ccard">
+        <div class="ch"><div><div class="ct">Délai — F. Réglées</div><div class="cs">Par activité (jours)</div></div><div class="cbadge green">Factures soldées</div></div>
+        <canvas id="ch-d3" height="220"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ PAGE 4: DÉLAIS ══ -->
+  <div id="p-delais" class="page content">
+    <div class="stitle">Courbe d'évolution des délais de règlement</div>
+    <div class="frow">
+      <span class="flbl">Délai :</span>
+      <button class="gf-btn active" onclick="setDelaiType('global',this)">Global</button>
+      <button class="gf-btn" onclick="setDelaiType('nr',this)">F. Non réglées</button>
+      <button class="gf-btn" onclick="setDelaiType('reg',this)">F. Réglées</button>
+    </div>
+    <div class="crow full">
+      <div class="ccard">
+        <div class="ch"><div><div class="ct" id="delai-title">Délais moyens de règlement — Toutes activités</div><div class="cs">Évolution annuelle 2017–2025 · Comportement de paiement</div></div><div class="cbadge amber" id="delai-badge">—</div></div>
+        <canvas id="ch-delai-main" height="160"></canvas>
+      </div>
+    </div>
+    <div class="crow half">
+      <div class="ccard">
+        <div class="ch"><div><div class="ct">Comparaison des 3 types de délais</div><div class="cs">Global · Non réglées · Réglées</div></div></div>
+        <canvas id="ch-delai-compare" height="220"></canvas>
+      </div>
+      <div class="ccard">
+        <div class="ch"><div><div class="ct">Impact activité sur les délais</div><div class="cs">Délai global moyen par activité/année</div></div>
+          <select id="sel-delai-act" onchange="updateDelaiActChart()">
+            <option value="DelaiGlobal">Délai Global</option>
+            <option value="DelaiRegle">Délai Réglées</option>
+          </select>
+        </div>
+        <canvas id="ch-delai-act" height="220"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ PAGE 5: TOP CLIENTS ══ -->
+  <div id="p-clients" class="page content">
+    <div class="frow">
+      <span class="flbl">Activité :</span>
+      <select id="sel-top-act" onchange="updateTopClients()"></select>
+      <span class="flbl" style="margin-left:10px">Trier par :</span>
+      <button class="gf-btn active" id="sortCA" onclick="setTopSort('CA',this)">CA</button>
+      <button class="gf-btn" id="sortBal" onclick="setTopSort('Balance',this)">Balance</button>
+    </div>
+    <div class="crow half">
+      <div class="ccard">
+        <div class="ch"><div><div class="ct" id="top-chart-title">Top 10 clients</div><div class="cs" id="top-chart-sub">—</div></div></div>
+        <canvas id="ch-topcli" height="290"></canvas>
+      </div>
+      <div class="ccard">
+        <div class="ch"><div><div class="ct">Tableau détaillé</div><div class="cs">CA · Balance · Factures</div></div></div>
+        <div class="tscroll"><table>
+          <thead><tr><th>#</th><th>Client</th><th>CA (TND)</th><th>Balance (TND)</th><th>Nb Fact.</th><th>Poids</th></tr></thead>
+          <tbody id="tb-topcli"></tbody>
+        </table></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ══════════════════════════════════════════════════════
+// CONSTANTS
+// ══════════════════════════════════════════════════════
+const ACTS=['DIGITAL','PROD','RUN SERVICES','CONSULTING','HOSTING','AUTRES PRODUITS','FORMATION','DISPLAY'];
+const ACT_C={'DIGITAL':'#0ea5e9','PROD':'#7c3aed','RUN SERVICES':'#f59e0b','CONSULTING':'#10b981','HOSTING':'#f43f5e','AUTRES PRODUITS':'#8b5cf6','FORMATION':'#06b6d4','DISPLAY':'#a78bfa'};
+const PAY_C={'paid':'rgba(16,185,129,.8)','in_payment':'rgba(14,165,233,.6)','partial':'rgba(245,158,11,.7)','not_paid':'rgba(244,63,94,.7)','reversed':'rgba(100,116,139,.5)'};
+const PAY_L={'paid':'Payé','in_payment':'En paiement','partial':'Partiel','not_paid':'Non payé','reversed':'Annulé'};
+const YEARS=[2017,2018,2019,2020,2021,2022,2023,2024,2025];
+const safe=v=>v==null?'':String(v);
+const nn=v=>(v===null||v===undefined||isNaN(v))?null:+v;
+const fmt=v=>!v&&v!==0?'—':v>=1e6?(v/1e6).toFixed(2)+'M':v>=1e3?(v/1e3).toFixed(0)+'K':Math.round(v).toString();
+const fmtN=v=>!v&&v!==0?'—':new Intl.NumberFormat('fr-FR',{maximumFractionDigits:0}).format(Math.round(v));
+const fmtTND=v=>fmtN(v)+' TND';
+const fmtJ=v=>v==null?'—':Math.round(v)+' j';
+const fmtPct=v=>v==null?'—':v.toFixed(1)+'%';
+
+// Chart registry
+const CH={};
+function mk(id,cfg){
+  if(CH[id]){try{CH[id].destroy();}catch(e){}}
+  const c=document.getElementById(id);if(!c)return;
+  CH[id]=new Chart(c,cfg);return CH[id];
+}
+function destroyAll(){Object.values(CH).forEach(c=>{try{c.destroy();}catch(e){}});Object.keys(CH).forEach(k=>delete CH[k]);}
+
+const TT={backgroundColor:'#1e293b',borderColor:'#334155',borderWidth:1,titleColor:'#f8fafc',bodyColor:'#94a3b8',padding:10,callbacks:{label:ctx=>' '+fmtTND(ctx.raw)}};
+const TT_J={...TT,callbacks:{label:ctx=>ctx.raw==null?' —':' '+Math.round(ctx.raw)+' jours'}};
+const TT_PCT={...TT,callbacks:{label:ctx=>ctx.raw==null?' —':' '+ctx.raw.toFixed(1)+'%'}};
+const GRID={color:'rgba(0,0,0,.06)'};
+const TICK={color:'#94a3b8',font:{size:10}};
+const TICK_SM={color:'#94a3b8',font:{size:9}};
+const BASE_OPTS={responsive:true,animation:{duration:500},plugins:{legend:{display:false},tooltip:TT},scales:{x:{grid:GRID,ticks:TICK},y:{grid:GRID,ticks:{...TICK,callback:v=>fmt(v)}}}};
+
+// Global state
+let G={};
+let ACT_FILTER='ALL';
+let DELAI_TYPE='global';
+let TOP_SORT='CA';
+
+// ══════════════════════════════════════════════════════
+// UPLOAD
+// ══════════════════════════════════════════════════════
+const dz=document.getElementById('dz');
+dz.addEventListener('dragover',e=>{e.preventDefault();dz.classList.add('over');});
+dz.addEventListener('dragleave',()=>dz.classList.remove('over'));
+dz.addEventListener('drop',e=>{e.preventDefault();dz.classList.remove('over');if(e.dataTransfer.files[0])handleFile(e.dataTransfer.files[0],false);});
+document.getElementById('fi').addEventListener('change',e=>{if(e.target.files[0])handleFile(e.target.files[0],false);});
+document.getElementById('fi2').addEventListener('change',e=>{if(e.target.files[0])handleFile(e.target.files[0],true);});
+
+function triggerUpdate(){document.getElementById('fi2').click();}
+function setProgress(pct,lbl,overlay){
+  const pw=overlay?document.getElementById('pw'):null;
+  const pf=overlay?document.getElementById('pf'):null;
+  const pl=overlay?document.getElementById('pl'):null;
+  if(pw){pw.style.display='block';pl.style.display='block';pf.style.width=pct+'%';pl.textContent=lbl;}
+}
+function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.style.display='block';setTimeout(()=>t.style.display='none',4000);}
+
+function handleFile(file,isUpdate){
+  if(!file.name.match(/\.xlsx?$/i)){toast('⚠️ Fichier .xlsx ou .xls requis');return;}
+  if(!isUpdate)setProgress(10,'Lecture du fichier…',true);
+  const reader=new FileReader();
+  reader.onload=e=>{
+    if(!isUpdate)setProgress(40,'Analyse des données…',true);
+    setTimeout(()=>{
+      try{
+        const wb=XLSX.read(e.target.result,{type:'array',cellDates:true});
+        const sn=wb.SheetNames.find(n=>/export/i.test(n))||wb.SheetNames[0];
+        const rows=XLSX.utils.sheet_to_json(wb.Sheets[sn],{defval:null});
+        if(!rows.length)throw new Error('Feuille vide');
+        if(!isUpdate)setProgress(70,'Calcul des indicateurs…',true);
+        setTimeout(()=>{
+          processData(rows,file.name,isUpdate);
+          if(!isUpdate){
+            setProgress(100,'✓ Prêt !',true);
+            setTimeout(()=>{
+              document.getElementById('uploadOverlay').classList.add('hidden');
+              document.getElementById('dash').style.display='block';
+            },400);
+          } else {
+            toast('✅ Données mises à jour — '+file.name);
+          }
+        },80);
+      }catch(err){toast('❌ '+err.message);}
+    },50);
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+// ══════════════════════════════════════════════════════
+// DATA PROCESSING
+// ══════════════════════════════════════════════════════
+function parseDate(v){
+  if(!v)return null;
+  if(v instanceof Date&&!isNaN(v))return v;
+  if(typeof v==='number'){const d=new Date(Math.round((v-25569)*86400000));return isNaN(d.getTime())?null:d;}
+  if(typeof v==='string'){const d=new Date(v);return isNaN(d.getTime())?null:d;}
+  return null;
+}
+
+function processData(rows,filename,isUpdate){
+  const s=rows[0]||{},ks=Object.keys(s);
+  const fc=(...ps)=>ks.find(k=>ps.some(p=>new RegExp(p,'i').test(k)))||null;
+  const CC={
+    client:fc('client'),act:fc('activit'),inv:fc('facture','n°'),
+    date:fc('date.facture','date_fact'),pay:fc('paiement'),
+    ttc:fc('total.ttc','totalttc','total_ttc','ttc'),
+    bal:fc('m\\..*recouv','m\\. recouv'),
+    rec:fc('montant.recouv','montant_recouv'),
+    dg:fc('recouv.*global','global.*j'),
+    dnr:fc('non.r','f.*non'),
+    dr:fc('r.*gl','réglées.*j','reglees.*j','detail.*rec'),
+  };
+  if(!CC.ttc){toast('❌ Colonne "Total TTC" introuvable');return;}
+
+  const data=rows.map(r=>{
+    const d=parseDate(CC.date?r[CC.date]:null);
+    const ar=safe(CC.act?r[CC.act]:'').trim().toUpperCase();
+    const an=ACTS.find(a=>ar===a||ar.includes(a))||ar;
+    return{
+      client:safe(CC.client?r[CC.client]:''),
+      act:an,
+      pay:safe(CC.pay?r[CC.pay]:'').toLowerCase().trim(),
+      ttc:+r[CC.ttc]||0,
+      bal:CC.bal?(+r[CC.bal]||0):0,
+      rec:CC.rec?(+r[CC.rec]||0):0,
+      dg:CC.dg?nn(r[CC.dg]):null,
+      dnr:CC.dnr?nn(r[CC.dnr]):null,
+      dr:CC.dr?nn(r[CC.dr]):null,
+      year:d?d.getFullYear():null,
+      month:d?d.getMonth()+1:null,
+    };
+  }).filter(r=>r.ttc>0);
+
+  const valid=data.filter(r=>r.year&&r.year>=2010&&r.year<=2035);
+  const years=[...new Set(valid.map(r=>r.year))].sort();
+
+  // Aggregators
+  function agg(arr){
+    const ca=arr.reduce((s,r)=>s+r.ttc,0);
+    const bal=arr.reduce((s,r)=>s+r.bal,0);
+    const rec=arr.reduce((s,r)=>s+r.rec,0);
+    const nb=arr.length;
+    const dg_arr=arr.map(r=>r.dg).filter(v=>v!=null);
+    const dnr_arr=arr.map(r=>r.dnr).filter(v=>v!=null);
+    const dr_arr=arr.map(r=>r.dr).filter(v=>v!=null);
+    const avg=a=>a.length?a.reduce((s,v)=>s+v,0)/a.length:null;
+    return{ca,bal,rec,nb,taux:ca>0?rec/ca*100:0,reste:bal-rec,dg:avg(dg_arr),dnr:avg(dnr_arr),dr:avg(dr_arr)};
+  }
+
+  // By year
+  const byYear=years.map(y=>({year:y,...agg(valid.filter(r=>r.year===y))}));
+
+  // By activité
+  const byAct=ACTS.map(a=>({act:a,...agg(valid.filter(r=>r.act===a))})).filter(x=>x.ca>0).sort((a,b)=>b.ca-a.ca);
+
+  // Year × Act
+  const yearAct={};
+  ACTS.forEach(a=>{yearAct[a]=years.map(y=>agg(valid.filter(r=>r.year===y&&r.act===a)));});
+
+  // Pay by year
+  const payByYear={};
+  ['paid','in_payment','partial','not_paid','reversed'].forEach(s=>{
+    payByYear[s]=years.map(y=>valid.filter(r=>r.year===y&&r.pay===s).reduce((t,r)=>t+r.ttc,0));
+  });
+
+  // Top clients per activité + global
+  function topClients(arr,n=10){
+    const m={};
+    arr.forEach(r=>{if(!r.client)return;if(!m[r.client])m[r.client]={ca:0,bal:0,nb:0};m[r.client].ca+=r.ttc;m[r.client].bal+=r.bal;m[r.client].nb++;});
+    return Object.entries(m).map(([c,v])=>({client:c,...v})).sort((a,b)=>b.ca-a.ca).slice(0,n);
+  }
+  const topGlobal=topClients(valid,20);
+  const topPerAct={};
+  ACTS.forEach(a=>{topPerAct[a]=topClients(valid.filter(r=>r.act===a),10);});
+  topPerAct['TOUTES']=topGlobal;
+
+  G={valid,years,byYear,byAct,yearAct,payByYear,topGlobal,topPerAct,filename,
+     totalCA:valid.reduce((s,r)=>s+r.ttc,0),
+     nbFact:valid.length,
+     nbClients:new Set(valid.map(r=>r.client).filter(Boolean)).size};
+
+  // Update header
+  document.getElementById('hfile').textContent=filename+' · '+new Date().toLocaleDateString('fr-FR');
+  document.getElementById('hbadge').textContent=G.nbFact.toLocaleString('fr-FR')+' factures · '+G.nbClients+' clients';
+
+  // Update activity filter buttons (show only existing activities)
+  document.querySelectorAll('.gfilter-bar .gf-btn').forEach(b=>{
+    const v=b.getAttribute('onclick').match(/'([^']+)'/)[1];
+    if(v==='ALL')return;
+    const exists=G.byAct.some(a=>a.act===v);
+    b.style.display=exists?'':'none';
+  });
+
+  // Update top client activity select
+  const sel=document.getElementById('sel-top-act');
+  sel.innerHTML='<option value="TOUTES">Toutes activités</option>';
+  G.byAct.forEach(a=>{const o=document.createElement('option');o.value=a.act;o.textContent=a.act;sel.appendChild(o);});
+
+  renderAll();
+}
+
+// ══════════════════════════════════════════════════════
+// FILTERS
+// ══════════════════════════════════════════════════════
+function setActFilter(v,btn){
+  ACT_FILTER=v;
+  document.querySelectorAll('.gfilter-bar .gf-btn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  renderAll();
+}
+function setDelaiType(v,btn){
+  DELAI_TYPE=v;
+  document.querySelectorAll('#p-delais .frow .gf-btn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  renderDelais();
+}
+function setTopSort(v,btn){
+  TOP_SORT=v;
+  document.getElementById('sortCA').classList.toggle('active',v==='CA');
+  document.getElementById('sortBal').classList.toggle('active',v==='Balance');
+  updateTopClients();
+}
+
+// ══════════════════════════════════════════════════════
+// FILTERED DATA HELPER
+// ══════════════════════════════════════════════════════
+function filteredByYear(){
+  if(ACT_FILTER==='ALL')return G.byYear;
+  return G.years.map(y=>{
+    const arr=G.valid.filter(r=>r.year===y&&r.act===ACT_FILTER);
+    const ca=arr.reduce((s,r)=>s+r.ttc,0);
+    const bal=arr.reduce((s,r)=>s+r.bal,0);
+    const rec=arr.reduce((s,r)=>s+r.rec,0);
+    const nb=arr.length;
+    const dga=arr.map(r=>r.dg).filter(v=>v!=null);
+    const dnra=arr.map(r=>r.dnr).filter(v=>v!=null);
+    const dra=arr.map(r=>r.dr).filter(v=>v!=null);
+    const avg=a=>a.length?a.reduce((s,v)=>s+v,0)/a.length:null;
+    return{year:y,ca,bal,rec,nb,taux:ca>0?rec/ca*100:0,reste:bal-rec,dg:avg(dga),dnr:avg(dnra),dr:avg(dra)};
+  });
+}
+function filteredByAct(){
+  if(ACT_FILTER==='ALL')return G.byAct;
+  const r=G.byAct.find(a=>a.act===ACT_FILTER);
+  return r?[r]:[];
+}
+
+// ══════════════════════════════════════════════════════
+// RENDER ALL
+// ══════════════════════════════════════════════════════
+function renderAll(){
+  renderOverview();
+  renderRecouvrement();
+  renderActivite();
+  renderDelais();
+  updateTopClients();
+}
+
+// ══════ PAGE 1: OVERVIEW ══════
+function renderOverview(){
+  const fby=filteredByYear();
+  const last=fby[fby.length-1]||{};
+  const prev=fby[fby.length-2]||{};
+  const totalCA=fby.reduce((s,r)=>s+r.ca,0);
+  const totalBal=fby.reduce((s,r)=>s+r.bal,0);
+  const totalRec=fby.reduce((s,r)=>s+r.rec,0);
+  const taux=totalCA>0?totalRec/totalCA*100:0;
+  const reste=fby.reduce((s,r)=>s+r.bal,0)-fby.reduce((s,r)=>s+r.rec,0);
+  const growth=prev.ca>0?((last.ca/prev.ca)-1)*100:null;
+
+  document.getElementById('kpi-overview').innerHTML=`
+    <div class="kcard c1"><div class="kicon">💰</div><div class="klbl">CA Total TTC</div><div class="kval" style="color:var(--accent)">${fmt(totalCA)} TND</div><div class="ksub">${G.years[0]}–${G.years[G.years.length-1]}</div>${growth!=null?`<div class="ktrend ${growth>=0?'up':'dn'}">${growth>=0?'↑ +':'↓ '}${Math.abs(growth).toFixed(1)}% vs ${prev.year}</div>`:''}</div>
+    <div class="kcard c2"><div class="kicon">📋</div><div class="klbl">Factures</div><div class="kval" style="color:var(--accent2)">${fmtN(G.nbFact)}</div><div class="ksub">${G.years[0]}–${G.years[G.years.length-1]}</div></div>
+    <div class="kcard c3"><div class="kicon">🏢</div><div class="klbl">Balance client</div><div class="kval" style="color:var(--accent3)">${fmt(totalBal)} TND</div><div class="ksub">Montant en cours</div></div>
+    <div class="kcard c4"><div class="kicon">✅</div><div class="klbl">Taux recouvrement</div><div class="kval" style="color:var(--accent4)">${fmtPct(taux)}</div><div class="ksub">Sur CA total</div></div>`;
+
+  const ylabels=fby.map(r=>String(r.year));
+
+  // CA vs Balance
+  document.getElementById('b-cabal').textContent=ACT_FILTER==='ALL'?'Toutes activités':ACT_FILTER;
+  mk('ch-cabal',{type:'bar',data:{labels:ylabels,datasets:[
+    {label:'CA TTC',data:fby.map(r=>r.ca),backgroundColor:'rgba(14,165,233,.7)',borderRadius:4,borderWidth:0},
+    {label:'Balance client',data:fby.map(r=>r.bal),backgroundColor:'rgba(245,158,11,.7)',borderRadius:4,borderWidth:0},
+  ]},options:{...BASE_OPTS,plugins:{...BASE_OPTS.plugins,legend:{display:true,labels:{color:'#64748b',font:{size:10},padding:10,boxWidth:10}},tooltip:TT}}});
+
+  // Taux recouvrement
+  mk('ch-taux',{type:'line',data:{labels:ylabels,datasets:[{
+    data:fby.map(r=>r.taux),
+    borderColor:'#10b981',backgroundColor:'rgba(16,185,129,.08)',
+    tension:.4,fill:true,pointRadius:5,pointBackgroundColor:'#10b981',borderWidth:2.5
+  }]},options:{...BASE_OPTS,plugins:{...BASE_OPTS.plugins,tooltip:TT_PCT},scales:{x:{grid:GRID,ticks:TICK},y:{grid:GRID,ticks:{...TICK,callback:v=>v.toFixed(0)+'%'},min:0,max:100}}}});
+
+  // Balance par activité (donut)
+  const fba=ACT_FILTER==='ALL'?G.byAct:G.byAct.filter(a=>a.act===ACT_FILTER);
+  mk('ch-balact',{type:'doughnut',data:{labels:fba.map(r=>r.act),datasets:[{data:fba.map(r=>r.bal),backgroundColor:fba.map(r=>ACT_C[r.act]||'#94a3b8'),borderWidth:2,borderColor:'#fff',hoverOffset:8}]},
+    options:{responsive:true,plugins:{legend:{position:'right',labels:{color:'#64748b',font:{size:10},padding:8,boxWidth:10}},tooltip:{...TT,callbacks:{label:ctx=>' '+ctx.label+': '+fmtTND(ctx.raw)}}},cutout:'65%'}});
+
+  // Reste à payer
+  mk('ch-reste',{type:'bar',data:{labels:fba.map(r=>r.act.length>14?r.act.slice(0,14)+'…':r.act),datasets:[{data:fba.map(r=>Math.max(0,r.bal-r.rec)),backgroundColor:fba.map(r=>ACT_C[r.act]||'#94a3b8'),borderRadius:5,borderWidth:0}]},
+    options:{...BASE_OPTS,indexAxis:'y',scales:{x:{grid:GRID,ticks:{...TICK,callback:v=>fmt(v)}},y:{grid:{display:false},ticks:TICK_SM}}}});
+}
+
+// ══════ PAGE 2: RECOUVREMENT ══════
+function renderRecouvrement(){
+  const fby=filteredByYear();
+  const totalCA=fby.reduce((s,r)=>s+r.ca,0);
+  const totalBal=fby.reduce((s,r)=>s+r.bal,0);
+  const totalRec=fby.reduce((s,r)=>s+r.rec,0);
+  const taux=totalCA>0?totalRec/totalCA*100:0;
+  const reste=totalBal-totalRec;
+  const dg_avg=fby.map(r=>r.dg).filter(v=>v!=null);
+  const dr_avg=fby.map(r=>r.dr).filter(v=>v!=null);
+  const dg=dg_avg.length?dg_avg.reduce((s,v)=>s+v,0)/dg_avg.length:null;
+  const dr=dr_avg.length?dr_avg.reduce((s,v)=>s+v,0)/dr_avg.length:null;
+
+  document.getElementById('kpi-rec').innerHTML=`
+    <div class="kcard c1"><div class="klbl">CA Total</div><div class="kval" style="color:var(--accent);font-size:18px">${fmt(totalCA)} TND</div></div>
+    <div class="kcard c2"><div class="klbl">Balance client</div><div class="kval" style="color:var(--accent2);font-size:18px">${fmt(totalBal)} TND</div></div>
+    <div class="kcard c4"><div class="klbl">Montant recouvré</div><div class="kval" style="color:var(--accent4);font-size:18px">${fmt(totalRec)} TND</div></div>
+    <div class="kcard c3"><div class="klbl">Reste à payer</div><div class="kval" style="color:var(--accent3);font-size:18px">${fmt(Math.max(0,reste))} TND</div></div>
+    <div class="kcard c5"><div class="klbl">Taux recouvrement</div><div class="kval" style="color:var(--accent4);font-size:18px">${fmtPct(taux)}</div></div>
+    <div class="kcard c6"><div class="klbl">Délai moyen global</div><div class="kval" style="color:#8b5cf6;font-size:18px">${fmtJ(dg)}</div><div class="ksub">F. réglées: ${fmtJ(dr)}</div></div>`;
+
+  const ylabels=fby.map(r=>String(r.year));
+  // Pay status stacked
+  mk('ch-pay',{type:'bar',data:{labels:ylabels,datasets:Object.keys(PAY_C).map(s=>({label:PAY_L[s],data:(G.payByYear[s]||ylabels.map(()=>0)),backgroundColor:PAY_C[s],borderRadius:2,borderWidth:0}))},
+    options:{...BASE_OPTS,plugins:{...BASE_OPTS.plugins,legend:{display:true,labels:{color:'#64748b',font:{size:9},padding:6,boxWidth:9}},tooltip:TT},scales:{x:{...BASE_OPTS.scales.x,stacked:true},y:{...BASE_OPTS.scales.y,stacked:true}}}});
+
+  // Balance vs Recouvré
+  mk('ch-balyr',{type:'bar',data:{labels:ylabels,datasets:[
+    {label:'Recouvré',data:fby.map(r=>r.rec),backgroundColor:'rgba(16,185,129,.7)',borderRadius:3,borderWidth:0},
+    {label:'Balance restante',data:fby.map(r=>Math.max(0,r.bal-r.rec)),backgroundColor:'rgba(245,158,11,.7)',borderRadius:3,borderWidth:0},
+  ]},options:{...BASE_OPTS,plugins:{...BASE_OPTS.plugins,legend:{display:true,labels:{color:'#64748b',font:{size:10},padding:8,boxWidth:10}},tooltip:TT},scales:{x:{...BASE_OPTS.scales.x,stacked:true},y:{...BASE_OPTS.scales.y,stacked:true}}}});
+
+  // CA vs Balance par activité
+  const fba=G.byAct.filter(a=>a.ca>0).sort((a,b)=>b.ca-a.ca);
+  mk('ch-cabalact',{type:'bar',data:{labels:fba.map(r=>r.act),datasets:[
+    {label:'CA TTC',data:fba.map(r=>r.ca),backgroundColor:'rgba(14,165,233,.7)',borderRadius:4,borderWidth:0},
+    {label:'Balance client',data:fba.map(r=>r.bal),backgroundColor:'rgba(245,158,11,.8)',borderRadius:4,borderWidth:0},
+  ]},options:{...BASE_OPTS,plugins:{...BASE_OPTS.plugins,legend:{display:true,labels:{color:'#64748b',font:{size:10},padding:10,boxWidth:10}},tooltip:TT}}});
+}
+
+// ══════ PAGE 3: ACTIVITÉ ══════
+function renderActivite(){
+  const acts=G.byAct;
+  // Table
+  const tb=document.getElementById('tb-actdetail');
+  tb.innerHTML=acts.map(a=>{
+    const tc=a.taux>=90?'chip-green':a.taux>=70?'chip-amber':'chip-red';
+    return`<tr>
+      <td style="font-weight:600;color:${ACT_C[a.act]||'#64748b'}">${a.act}</td>
+      <td>${fmtN(a.ca)}</td>
+      <td>${fmtN(a.bal)}</td>
+      <td>${fmtN(a.rec)}</td>
+      <td><span class="chip ${tc}">${fmtPct(a.taux)}</span></td>
+      <td style="color:${a.reste>0?'#d97706':'#059669'}">${fmtN(Math.max(0,a.bal-a.rec))}</td>
+      <td>${a.nb.toLocaleString('fr-FR')}</td>
+      <td><span class="chip chip-blue">${fmtJ(a.dg)}</span></td>
+      <td><span class="chip chip-amber">${fmtJ(a.dnr)}</span></td>
+      <td><span class="chip chip-green">${fmtJ(a.dr)}</span></td>
+    </tr>`;
+  }).join('');
+
+  const lbls=acts.map(a=>a.act.length>12?a.act.slice(0,12)+'…':a.act);
+  const hbar=(id,data,colors,ttcb)=>mk(id,{type:'bar',data:{labels:lbls,datasets:[{data,backgroundColor:colors,borderRadius:4,borderWidth:0}]},
+    options:{...BASE_OPTS,indexAxis:'y',plugins:{...BASE_OPTS.plugins,tooltip:{...TT,callbacks:{label:ttcb}}},scales:{x:{grid:GRID,ticks:{...TICK,callback:v=>v==null?'':Math.round(v)+' j'}},y:{grid:{display:false},ticks:TICK_SM}}}});
+
+  hbar('ch-d1',acts.map(a=>a.dg),acts.map(a=>ACT_C[a.act]||'#94a3b8'),ctx=>ctx.raw==null?' —':' '+Math.round(ctx.raw)+' jours');
+  hbar('ch-d2',acts.map(a=>a.dnr),acts.map(a=>(ACT_C[a.act]||'#94a3b8').replace(')',',0.7)').replace('#','rgba(').replace(/^rgba\(#/,'rgba(')),ctx=>ctx.raw==null?' —':' '+Math.round(ctx.raw)+' jours');
+  hbar('ch-d3',acts.map(a=>a.dr),acts.map(()=>'rgba(16,185,129,.75)'),ctx=>ctx.raw==null?' —':' '+Math.round(ctx.raw)+' jours');
+}
+
+// ══════ PAGE 4: DÉLAIS ══════
+function renderDelais(){
+  const fby=filteredByYear();
+  const ylabels=fby.map(r=>String(r.year));
+  const field=DELAI_TYPE==='global'?'dg':DELAI_TYPE==='nr'?'dnr':'dr';
+  const titles={'global':'Délai global moyen','nr':'Délai — Factures non réglées','reg':'Délai — Factures réglées'};
+  document.getElementById('delai-title').textContent=titles[DELAI_TYPE]+' · '+(ACT_FILTER==='ALL'?'Toutes activités':ACT_FILTER);
+
+  const mainData=fby.map(r=>r[field]);
+  const avg=mainData.filter(v=>v!=null);
+  const avgVal=avg.length?avg.reduce((s,v)=>s+v,0)/avg.length:null;
+  document.getElementById('delai-badge').textContent=avgVal?'Moy. '+Math.round(avgVal)+' j':'—';
+
+  mk('ch-delai-main',{type:'line',data:{labels:ylabels,datasets:[{
+    label:titles[DELAI_TYPE],data:mainData,
+    borderColor:DELAI_TYPE==='global'?'#0ea5e9':DELAI_TYPE==='nr'?'#f43f5e':'#10b981',
+    backgroundColor:DELAI_TYPE==='global'?'rgba(14,165,233,.08)':DELAI_TYPE==='nr'?'rgba(244,63,94,.08)':'rgba(16,185,129,.08)',
+    tension:.4,fill:true,pointRadius:5,borderWidth:2.5,
+    pointBackgroundColor:DELAI_TYPE==='global'?'#0ea5e9':DELAI_TYPE==='nr'?'#f43f5e':'#10b981',
+  }]},options:{...BASE_OPTS,plugins:{...BASE_OPTS.plugins,tooltip:TT_J},scales:{x:{grid:GRID,ticks:TICK},y:{grid:GRID,ticks:{...TICK,callback:v=>v+' j'}}}}});
+
+  // Compare 3 types
+  mk('ch-delai-compare',{type:'line',data:{labels:ylabels,datasets:[
+    {label:'Global',data:fby.map(r=>r.dg),borderColor:'#0ea5e9',backgroundColor:'transparent',tension:.4,pointRadius:4,borderWidth:2},
+    {label:'F. Non réglées',data:fby.map(r=>r.dnr),borderColor:'#f43f5e',backgroundColor:'transparent',tension:.4,pointRadius:4,borderWidth:2,borderDash:[5,3]},
+    {label:'F. Réglées',data:fby.map(r=>r.dr),borderColor:'#10b981',backgroundColor:'transparent',tension:.4,pointRadius:4,borderWidth:2},
+  ]},options:{...BASE_OPTS,plugins:{...BASE_OPTS.plugins,legend:{display:true,labels:{color:'#64748b',font:{size:10},padding:10,boxWidth:12}},tooltip:TT_J},scales:{x:{grid:GRID,ticks:TICK},y:{grid:GRID,ticks:{...TICK,callback:v=>v+' j'}}}}});
+
+  updateDelaiActChart();
+}
+
+function updateDelaiActChart(){
+  const sel=document.getElementById('sel-delai-act');
+  const field=sel?sel.value:'DelaiGlobal';
+  const dbField=field==='DelaiGlobal'?'dg':'dr';
+  const mainActs=G.byAct.slice(0,5).map(a=>a.act);
+  const ylabels=G.years.map(String);
+
+  mk('ch-delai-act',{type:'line',data:{labels:ylabels,datasets:mainActs.map(a=>({
+    label:a,
+    data:G.years.map(y=>{const rows=G.yearAct[a];const idx=G.years.indexOf(y);return rows&&rows[idx]?rows[idx][dbField]:null;}),
+    borderColor:ACT_C[a]||'#94a3b8',backgroundColor:'transparent',tension:.4,pointRadius:3,borderWidth:2,
+    spanGaps:true,
+  }))},options:{...BASE_OPTS,plugins:{...BASE_OPTS.plugins,legend:{display:true,labels:{color:'#64748b',font:{size:9},padding:7,boxWidth:10}},tooltip:TT_J},scales:{x:{grid:GRID,ticks:TICK},y:{grid:GRID,ticks:{...TICK,callback:v=>v+' j'}}}}});
+}
+
+// ══════ PAGE 5: TOP CLIENTS ══════
+function updateTopClients(){
+  const act=document.getElementById('sel-top-act')?.value||'TOUTES';
+  const sort=TOP_SORT;
+  let clients=(G.topPerAct[act]||G.topGlobal).slice();
+  clients.sort((a,b)=>sort==='CA'?b.ca-a.ca:b.bal-a.bal);
+  clients=clients.slice(0,10);
+
+  const title=`Top ${clients.length} clients — ${act==='TOUTES'?'Toutes activités':act}`;
+  const sub=`Trié par ${sort==='CA'?'Chiffre d\'Affaires':'Balance client'}`;
+  document.getElementById('top-chart-title').textContent=title;
+  document.getElementById('top-chart-sub').textContent=sub;
+
+  const vals=clients.map(c=>sort==='CA'?c.ca:c.bal);
+  const maxV=vals[0]||1;
+  mk('ch-topcli',{type:'bar',data:{labels:clients.map(c=>c.client.length>26?c.client.slice(0,26)+'…':c.client),datasets:[{data:vals,backgroundColor:clients.map((_,i)=>`hsl(${200+i*12},72%,${54-i*1.5}%)`),borderRadius:5,borderWidth:0}]},
+    options:{...BASE_OPTS,indexAxis:'y',scales:{x:{grid:GRID,ticks:{...TICK,callback:v=>fmt(v)}},y:{grid:{display:false},ticks:{...TICK_SM,color:'#374151'}}}}});
+
+  const totalCA=G.valid.reduce((s,r)=>s+r.ttc,0);
+  document.getElementById('tb-topcli').innerHTML=clients.map((c,i)=>{
+    const pct=(c.ca/totalCA*100).toFixed(1);
+    const bw=Math.round(c.ca/maxV*80);
+    const rc=i===0?'r1':i===1?'r2':i===2?'r3':'rn';
+    return`<tr>
+      <td><span class="rnk ${rc}">${i+1}</span></td>
+      <td style="font-weight:500;max-width:200px;overflow:hidden;text-overflow:ellipsis">${c.client}</td>
+      <td style="font-weight:600">${fmtN(c.ca)}</td>
+      <td style="color:${c.bal>0?'#d97706':'#059669'}">${fmtN(c.bal)}</td>
+      <td style="color:var(--muted)">${c.nb.toLocaleString('fr-FR')}</td>
+      <td><span class="barmini" style="width:${bw}px"></span></td>
+    </tr>`;
+  }).join('');
+}
+
+// ══════════════════════════════════════════════════════
+// NAVIGATION
+// ══════════════════════════════════════════════════════
+const PAGE_MAP={overview:'p-overview',recouvrement:'p-recouvrement',activite:'p-activite',delais:'p-delais',clients:'p-clients'};
+function P(id){
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('.nbtn').forEach(b=>b.classList.remove('active'));
+  document.getElementById(PAGE_MAP[id]).classList.add('active');
+  const idx={overview:0,recouvrement:1,activite:2,delais:3,clients:4};
+  document.querySelectorAll('.nbtn')[idx[id]]?.classList.add('active');
+}
+</script>
+</body>
+</html>

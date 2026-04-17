@@ -1,4 +1,4 @@
-import { LayoutDashboard, Users, FileText, TrendingUp, Bell, Settings } from "lucide-react";
+import { LayoutDashboard, Users, FileText, TrendingUp, Bell, Settings, Sparkles } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useLocation } from "react-router-dom";
 import {
@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/sidebar";
 
 const navItems = [
+  { title: "Analyse IA", url: "/analyse-ia", icon: Sparkles },
   { title: "Dashboard", url: "/", icon: LayoutDashboard },
   { title: "Encours Clients", url: "/encours", icon: Users },
   { title: "Factures", url: "/factures", icon: FileText },

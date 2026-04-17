@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from "react";
-import { BrowserRouter, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Route, Routes, useLocation } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/toaster";
@@ -9,6 +9,7 @@ import AppSidebar from "@/components/AppSidebar";
 import TopBar from "@/components/TopBar";
 import ImportModal from "@/components/ImportModal";
 import Dashboard from "@/pages/Dashboard";
+import AnalyseIA from "@/pages/AnalyseIA";
 import Encours from "@/pages/Encours";
 import Factures from "@/pages/Factures";
 import Previsions from "@/pages/Previsions";
@@ -81,11 +82,6 @@ function DebugPanel() {
 
 const App = () => {
   const [refreshKey, setRefreshKey] = useState(0);
-  const [showImport, setShowImport] = useState(false);
-
-  useEffect(() => {
-    if (!hasData()) setShowImport(true);
-  }, []);
 
   const handleDataChange = useCallback(() => {
     setRefreshKey(k => k + 1);
@@ -97,37 +93,56 @@ const App = () => {
         <Toaster />
         <Sonner />
         <BrowserRouter>
-          <SidebarProvider>
-            <div className="min-h-screen flex w-full">
-              <AppSidebar />
-              <div className="flex-1 flex flex-col min-w-0">
-                <TopBar refreshKey={refreshKey} />
-                <main className="flex-1 overflow-auto bg-muted/30" key={refreshKey}>
-                  <Routes>
-                    <Route path="/" element={<Dashboard />} />
-                    <Route path="/encours" element={<Encours />} />
-                    <Route path="/factures" element={<Factures />} />
-                    <Route path="/previsions" element={<Previsions />} />
-                    <Route path="/actions" element={<Actions />} />
-                    <Route path="/parametres" element={<Parametres onDataChange={handleDataChange} />} />
-                    <Route path="*" element={<NotFound />} />
-                  </Routes>
-                </main>
-              </div>
-            </div>
-          </SidebarProvider>
-          <ImportModal
-            open={showImport}
-            onClose={(imported) => {
-              setShowImport(false);
-              if (imported) handleDataChange();
-            }}
-          />
+          <AppInner refreshKey={refreshKey} handleDataChange={handleDataChange} />
           <DebugPanel />
         </BrowserRouter>
       </TooltipProvider>
     </QueryClientProvider>
   );
 };
+
+function AppInner({ refreshKey, handleDataChange }: { refreshKey: number; handleDataChange: () => void }) {
+  const [showImport, setShowImport] = useState(false);
+  const location = useLocation();
+
+  useEffect(() => {
+    // On masque le modal d'import global sur la page Analyse IA
+    // (celle-ci gère son propre upload de Balance.xlsx via iframe).
+    if (location.pathname.startsWith("/analyse-ia")) return;
+    if (!hasData()) setShowImport(true);
+  }, [location.pathname]);
+
+  return (
+    <>
+      <SidebarProvider>
+        <div className="min-h-screen flex w-full">
+          <AppSidebar />
+          <div className="flex-1 flex flex-col min-w-0">
+            <TopBar refreshKey={refreshKey} />
+            <main className="flex-1 overflow-auto bg-muted/30" key={refreshKey}>
+              <Routes>
+                <Route path="/" element={<Dashboard />} />
+                <Route path="/analyse-ia" element={<AnalyseIA />} />
+                <Route path="/encours" element={<Encours />} />
+                <Route path="/factures" element={<Factures />} />
+                <Route path="/previsions" element={<Previsions />} />
+                <Route path="/actions" element={<Actions />} />
+                <Route path="/parametres" element={<Parametres onDataChange={handleDataChange} />} />
+                <Route path="*" element={<NotFound />} />
+              </Routes>
+            </main>
+          </div>
+        </div>
+      </SidebarProvider>
+      <ImportModal
+        open={showImport}
+        onClose={(imported) => {
+          setShowImport(false);
+          if (imported) handleDataChange();
+        }}
+      />
+    </>
+  );
+}
 
 export default App;
