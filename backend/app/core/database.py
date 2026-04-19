@@ -59,9 +59,13 @@ async def ensure_indexes() -> None:
     # import_logs — timeline
     await db.import_logs.create_index([("org_id", 1), ("created_at", -1)])
 
-    # ai_suggestions_cache — TTL index will be managed at query time
+    # ai_suggestions_cache — TTL index managed by Mongo
     await db.ai_cache.create_index([("org_id", 1), ("cache_key", 1)], unique=True)
     await db.ai_cache.create_index("expires_at", expireAfterSeconds=0)
 
-    # report_configs (prepared for Phase 2)
+    # report_configs — lookup enabled configs per org
     await db.report_configs.create_index([("org_id", 1), ("enabled", 1)])
+
+    # report_runs — timeline per org
+    await db.report_runs.create_index([("org_id", 1), ("started_at", -1)])
+    await db.report_runs.create_index([("config_id", 1), ("started_at", -1)])

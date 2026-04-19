@@ -6,7 +6,8 @@ import logging
 
 from app.core.config import get_settings
 from app.core.database import connect_to_mongo, close_mongo_connection, ensure_indexes
-from app.routers import auth, imports, data, actions, settings as settings_router, analytics
+from app.routers import auth, imports, data, actions, settings as settings_router, analytics, reports
+from app.services.report_scheduler import start_scheduler, stop_scheduler
 
 
 logging.basicConfig(
@@ -21,10 +22,12 @@ async def lifespan(app: FastAPI):
     # Startup
     connect_to_mongo()
     await ensure_indexes()
+    start_scheduler()
     s = get_settings()
-    logger.info("Backend started. AI=%s, Email=%s", s.ai_enabled, s.email_enabled)
+    logger.info("Backend started. AI=%s, Email=%s, Scheduler=on", s.ai_enabled, s.email_enabled)
     yield
     # Shutdown
+    stop_scheduler()
     close_mongo_connection()
     logger.info("Backend stopped.")
 
@@ -32,7 +35,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="CashFlow Pilot API",
     description="Multi-tenant recouvrement dashboard API",
-    version="1.0.0",
+    version="1.1.0",
     lifespan=lifespan,
 )
 
@@ -52,6 +55,7 @@ app.include_router(data.router, prefix="/api")
 app.include_router(actions.router, prefix="/api")
 app.include_router(settings_router.router, prefix="/api")
 app.include_router(analytics.router, prefix="/api")
+app.include_router(reports.router, prefix="/api")
 
 
 @app.get("/api/health")
