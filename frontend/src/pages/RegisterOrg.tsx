@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { useAuth } from "@/contexts/AuthContext";
 import { Loader2, Building2 } from "lucide-react";
 import { ApiError } from "@/lib/api";
+import { cn } from "@/lib/utils";
 
 export default function RegisterOrg() {
   const navigate = useNavigate();
@@ -141,8 +142,16 @@ export default function RegisterOrg() {
               </div>
             )}
             <Button type="submit" className="w-full" disabled={submitting}>
-              {submitting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-              Créer l'organisation
+              <span className="inline-flex w-full items-center justify-center gap-2">
+                <Loader2
+                  aria-hidden
+                  className={cn(
+                    "h-4 w-4 shrink-0",
+                    submitting ? "animate-spin" : "invisible",
+                  )}
+                />
+                <span>Créer l&apos;organisation</span>
+              </span>
             </Button>
           </form>
           <div className="mt-6 pt-6 border-t text-center text-sm text-muted-foreground">

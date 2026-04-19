@@ -1,5 +1,14 @@
 import { createContext, useContext, useEffect, useState, ReactNode, useCallback } from "react";
-import { authApi, type UserPublic, type OrgLight } from "@/lib/api";
+import {
+  authApi,
+  api,
+  refreshSession,
+  persistSessionTokens,
+  clearSessionTokens,
+  type UserPublic,
+  type OrgLight,
+  type AuthResponse,
+} from "@/lib/api";
 
 export type UserRole = UserPublic["role"];
 
@@ -35,13 +44,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   });
 
   const loadMe = useCallback(async () => {
-    try {
-      const data = await authApi.me();
+    const apply = (data: AuthResponse) =>
       setState({ user: data.user, org: data.org, loading: false, error: null });
+    const clear = () => setState({ user: null, org: null, loading: false, error: null });
+
+    try {
+      apply(await api<AuthResponse>("/api/auth/me", { skipRefresh: true }));
+      return;
     } catch {
-      // Not logged in is an expected state, don't surface it as an error
-      setState({ user: null, org: null, loading: false, error: null });
+      // No access cookie (or expired): try refresh once, then /me again — avoids chaining refresh inside api() for guests
     }
+    if (await refreshSession()) {
+      try {
+        apply(await api<AuthResponse>("/api/auth/me", { skipRefresh: true }));
+        return;
+      } catch {
+        /* session still invalid */
+      }
+    }
+    clear();
   }, []);
 
   useEffect(() => {
@@ -52,6 +73,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setState(s => ({ ...s, loading: true, error: null }));
     try {
       const data = await authApi.login(email, password);
+      if (data.access_token && data.refresh_token) {
+        persistSessionTokens(data.access_token, data.refresh_token);
+      }
       setState({ user: data.user, org: data.org, loading: false, error: null });
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Login failed";
@@ -64,6 +88,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setState(s => ({ ...s, loading: true, error: null }));
     try {
       const data = await authApi.registerOrg(payload);
+      if (data.access_token && data.refresh_token) {
+        persistSessionTokens(data.access_token, data.refresh_token);
+      }
       setState({ user: data.user, org: data.org, loading: false, error: null });
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Registration failed";
@@ -78,6 +105,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch {
       // Ignore network errors on logout — clear local state anyway
     }
+    clearSessionTokens();
     setState({ user: null, org: null, loading: false, error: null });
   }, []);
 

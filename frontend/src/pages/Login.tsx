@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { useAuth } from "@/contexts/AuthContext";
 import { Loader2, Sparkles } from "lucide-react";
 import { ApiError } from "@/lib/api";
+import { cn } from "@/lib/utils";
 
 export default function Login() {
   const navigate = useNavigate();
@@ -83,8 +84,16 @@ export default function Login() {
               </div>
             )}
             <Button type="submit" className="w-full" disabled={submitting}>
-              {submitting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-              Se connecter
+              <span className="inline-flex w-full items-center justify-center gap-2">
+                <Loader2
+                  aria-hidden
+                  className={cn(
+                    "h-4 w-4 shrink-0",
+                    submitting ? "animate-spin" : "invisible",
+                  )}
+                />
+                <span>Se connecter</span>
+              </span>
             </Button>
           </form>
           <div className="mt-6 pt-6 border-t text-center text-sm text-muted-foreground">

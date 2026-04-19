@@ -60,6 +60,14 @@ class UserPublic(BaseModel):
 
 
 class AuthResponse(BaseModel):
-    """Returned after successful login."""
+    """Returned after successful login/register/me."""
     user: UserPublic
     org: dict  # Light org info: {id, name, slug}
+    # Also returned on login/register so SPAs can use Authorization when cookies are blocked (embedded browsers).
+    access_token: Optional[str] = None
+    refresh_token: Optional[str] = None
+
+
+class RefreshBody(BaseModel):
+    """Optional body when refresh cookie is not sent (same clients as above)."""
+    refresh_token: str | None = None

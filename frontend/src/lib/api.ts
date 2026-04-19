@@ -12,10 +12,13 @@ export class ApiError extends Error {
   }
 }
 
-// Base URL is configurable through an env var so the frontend can point at a
-// different backend in production without a rebuild. Falls back to localhost.
-const RAW_BASE = (import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000") as string;
-export const API_BASE = RAW_BASE.replace(/\/$/, "");
+// Dev: always same-origin `/api` (Vite proxy → backend). If VITE_API_BASE_URL points at
+// :8000 while the page is on :3000, browsers do not send httpOnly cookies → "No refresh token".
+// Production: set VITE_API_BASE_URL when the API is on another origin.
+const raw = import.meta.env.DEV
+  ? ""
+  : ((import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "");
+export const API_BASE = raw.replace(/\/$/, "");
 
 type HttpMethod = "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
 
@@ -30,7 +33,11 @@ interface RequestOptions {
 }
 
 function buildUrl(path: string, query?: RequestOptions["query"]): string {
-  const url = new URL(API_BASE + (path.startsWith("/") ? path : `/${path}`));
+  const pathname = path.startsWith("/") ? path : `/${path}`;
+  const origin =
+    API_BASE ||
+    (typeof window !== "undefined" ? window.location.origin : "http://localhost:3000");
+  const url = new URL(pathname, origin.endsWith("/") ? origin : `${origin}/`);
   if (query) {
     for (const [k, v] of Object.entries(query)) {
       if (v !== null && v !== undefined && v !== "") {
@@ -41,13 +48,50 @@ function buildUrl(path: string, query?: RequestOptions["query"]): string {
   return url.toString();
 }
 
-async function refreshOnce(): Promise<boolean> {
+/** Fallback when httpOnly cookies are not stored (embedded browsers). */
+const SS_ACCESS = "cfp_access_token";
+const SS_REFRESH = "cfp_refresh_token";
+
+export function persistSessionTokens(access: string, refresh: string) {
+  if (typeof sessionStorage === "undefined") return;
+  sessionStorage.setItem(SS_ACCESS, access);
+  sessionStorage.setItem(SS_REFRESH, refresh);
+}
+
+export function clearSessionTokens() {
+  if (typeof sessionStorage === "undefined") return;
+  sessionStorage.removeItem(SS_ACCESS);
+  sessionStorage.removeItem(SS_REFRESH);
+}
+
+function getAuthHeaders(): Record<string, string> {
+  if (typeof sessionStorage === "undefined") return {};
+  const a = sessionStorage.getItem(SS_ACCESS);
+  if (a) return { Authorization: `Bearer ${a}` };
+  return {};
+}
+
+/** Exchange refresh token (cookie or sessionStorage body) for new tokens. */
+export async function refreshSession(): Promise<boolean> {
   try {
+    const storedRefresh =
+      typeof sessionStorage !== "undefined" ? sessionStorage.getItem(SS_REFRESH) : null;
+    const headers: Record<string, string> = { ...getAuthHeaders() };
+    if (storedRefresh) {
+      headers["Content-Type"] = "application/json";
+    }
     const res = await fetch(buildUrl("/api/auth/refresh"), {
       method: "POST",
       credentials: "include",
+      headers,
+      body: storedRefresh ? JSON.stringify({ refresh_token: storedRefresh }) : undefined,
     });
-    return res.ok;
+    if (!res.ok) return false;
+    const data = (await res.json()) as { access_token?: string; refresh_token?: string };
+    if (data.access_token && data.refresh_token) {
+      persistSessionTokens(data.access_token, data.refresh_token);
+    }
+    return true;
   } catch {
     return false;
   }
@@ -63,7 +107,7 @@ export async function api<T = unknown>(path: string, opts: RequestOptions = {}):
     skipRefresh = false,
   } = opts;
 
-  const headers: Record<string, string> = {};
+  const headers: Record<string, string> = { ...getAuthHeaders() };
   let payload: BodyInit | undefined;
 
   if (formData) {
@@ -87,7 +131,7 @@ export async function api<T = unknown>(path: string, opts: RequestOptions = {}):
 
   // If access token expired, try refreshing once and replay the request
   if (response.status === 401 && !skipRefresh && path !== "/api/auth/login" && path !== "/api/auth/refresh") {
-    const refreshed = await refreshOnce();
+    const refreshed = await refreshSession();
     if (refreshed) {
       response = await doFetch();
     }
@@ -149,6 +193,8 @@ export interface OrgLight {
 export interface AuthResponse {
   user: UserPublic;
   org: OrgLight;
+  access_token?: string;
+  refresh_token?: string;
 }
 
 export const authApi = {
@@ -165,9 +211,11 @@ export const authApi = {
 
   logout: () => api<void>("/api/auth/logout", { method: "POST" }),
 
-  me: () => api<AuthResponse>("/api/auth/me"),
+  /** Uses skipRefresh — call refreshSession() first if you need to recover an expired access token. */
+  me: () => api<AuthResponse>("/api/auth/me", { skipRefresh: true }),
 
-  refresh: () => api<void>("/api/auth/refresh", { method: "POST" }),
+  refresh: () =>
+    api<{ access_token: string; refresh_token: string }>("/api/auth/refresh", { method: "POST" }),
 };
 
 export const importsApi = {

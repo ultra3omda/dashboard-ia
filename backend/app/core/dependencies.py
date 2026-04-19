@@ -1,22 +1,33 @@
 """FastAPI dependencies for authentication and authorisation."""
 from typing import Optional
-from fastapi import Cookie, Depends, HTTPException, status
+from fastapi import Cookie, Depends, Header, HTTPException, status
 from app.core.database import get_db
 from app.core.jwt_utils import decode_token, ACCESS_COOKIE_NAME
 from app.models.user import UserInDB
 from app.models.enums import UserRole
 
 
+def _access_token_from_request(
+    authorization: Optional[str],
+    cfp_access: Optional[str],
+) -> Optional[str]:
+    if authorization and authorization.lower().startswith("bearer "):
+        return authorization[7:].strip() or None
+    return cfp_access
+
+
 async def get_current_user(
+    authorization: Optional[str] = Header(None),
     cfp_access: Optional[str] = Cookie(None, alias=ACCESS_COOKIE_NAME),
 ) -> UserInDB:
-    """Decode the access cookie and fetch the user. Raises 401 on failure."""
-    if not cfp_access:
+    """Decode access JWT from cookie or Authorization: Bearer. Raises 401 on failure."""
+    token = _access_token_from_request(authorization, cfp_access)
+    if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Not authenticated",
         )
-    payload = decode_token(cfp_access)
+    payload = decode_token(token)
     if payload is None or payload.get("type") != "access":
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

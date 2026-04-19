@@ -1,6 +1,7 @@
 """Authentication endpoints: register-org, login, logout, me, refresh."""
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException, Response, status, Cookie
+from fastapi import APIRouter, Body, Depends, HTTPException, Response, status, Cookie
+from fastapi.responses import JSONResponse
 from pymongo.errors import DuplicateKeyError
 
 from app.core.database import get_db
@@ -12,7 +13,7 @@ from app.core.jwt_utils import (
 )
 from app.core.dependencies import get_current_user
 from app.models.user import (
-    UserRegister, UserLogin, UserInDB, UserPublic, AuthResponse,
+    UserRegister, UserLogin, UserInDB, UserPublic, AuthResponse, RefreshBody,
 )
 from app.models.org import Org
 from app.models.settings import AppSettings
@@ -22,7 +23,7 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 @router.post("/register-org", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
-async def register_org(payload: UserRegister, response: Response):
+async def register_org(payload: UserRegister):
     """Create a new organisation + its first admin user.
     This is the public onboarding endpoint used by new tenants.
     """
@@ -64,16 +65,20 @@ async def register_org(payload: UserRegister, response: Response):
     # Issue tokens
     access = create_access_token(user.id, org.id, user.role.value)
     refresh = create_refresh_token(user.id, org.id)
-    set_auth_cookies(response, access, refresh)
 
-    return AuthResponse(
+    auth = AuthResponse(
         user=UserPublic(**user.model_dump()),
         org={"id": org.id, "name": org.name, "slug": org.slug},
+        access_token=access,
+        refresh_token=refresh,
     )
+    resp = JSONResponse(content=auth.model_dump(mode="json"), status_code=status.HTTP_201_CREATED)
+    set_auth_cookies(resp, access, refresh)
+    return resp
 
 
 @router.post("/login", response_model=AuthResponse)
-async def login(payload: UserLogin, response: Response):
+async def login(payload: UserLogin):
     """Authenticate an existing user and issue session cookies."""
     db = get_db()
     doc = await db.users.find_one({"email": payload.email.lower()})
@@ -97,21 +102,26 @@ async def login(payload: UserLogin, response: Response):
 
     access = create_access_token(user.id, user.org_id, user.role.value)
     refresh = create_refresh_token(user.id, user.org_id)
-    set_auth_cookies(response, access, refresh)
 
-    return AuthResponse(
+    auth = AuthResponse(
         user=UserPublic(**user.model_dump()),
         org={"id": org_doc["id"], "name": org_doc["name"], "slug": org_doc["slug"]},
+        access_token=access,
+        refresh_token=refresh,
     )
+    resp = JSONResponse(content=auth.model_dump(mode="json"))
+    set_auth_cookies(resp, access, refresh)
+    return resp
 
 
 @router.post("/logout", status_code=204)
 async def logout(response: Response):
     clear_auth_cookies(response)
-    return Response(status_code=204)
+    response.status_code = 204
+    return response
 
 
-@router.get("/me", response_model=AuthResponse)
+@router.get("/me", response_model=AuthResponse, response_model_exclude_none=True)
 async def me(user: UserInDB = Depends(get_current_user)):
     db = get_db()
     org_doc = await db.orgs.find_one({"id": user.org_id})
@@ -123,15 +133,16 @@ async def me(user: UserInDB = Depends(get_current_user)):
     )
 
 
-@router.post("/refresh", status_code=204)
+@router.post("/refresh")
 async def refresh(
-    response: Response,
     cfp_refresh: str | None = Cookie(None, alias=REFRESH_COOKIE_NAME),
+    body: RefreshBody | None = Body(None),
 ):
-    """Exchange a valid refresh cookie for a fresh access cookie."""
-    if not cfp_refresh:
+    """Exchange a valid refresh token (cookie or JSON body) for new tokens + cookies."""
+    refresh_raw = cfp_refresh or (body.refresh_token if body else None)
+    if not refresh_raw:
         raise HTTPException(status_code=401, detail="No refresh token")
-    payload = decode_token(cfp_refresh)
+    payload = decode_token(refresh_raw)
     if payload is None or payload.get("type") != "refresh":
         raise HTTPException(status_code=401, detail="Invalid refresh token")
 
@@ -144,5 +155,7 @@ async def refresh(
 
     new_access = create_access_token(user_id, org_id, user_doc["role"])
     new_refresh = create_refresh_token(user_id, org_id)
-    set_auth_cookies(response, new_access, new_refresh)
-    return Response(status_code=204)
+    out = {"access_token": new_access, "refresh_token": new_refresh}
+    resp = JSONResponse(content=out)
+    set_auth_cookies(resp, new_access, new_refresh)
+    return resp

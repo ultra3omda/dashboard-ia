@@ -45,13 +45,21 @@ def decode_token(token: str) -> Optional[dict]:
         return None
 
 
+def _normalize_samesite(value: str) -> str:
+    """Starlette expects 'lax' | 'strict' | 'none' (lowercase)."""
+    s = (value or "lax").strip().lower()
+    if s not in ("lax", "strict", "none"):
+        return "lax"
+    return s
+
+
 def set_auth_cookies(response, access_token: str, refresh_token: str) -> None:
     """Attach access + refresh as httpOnly cookies on the response."""
     settings = get_settings()
     common = dict(
         httponly=True,
         secure=settings.cookie_secure,
-        samesite=settings.cookie_samesite,
+        samesite=_normalize_samesite(settings.cookie_samesite),
         path="/",
     )
     if settings.cookie_domain:
@@ -76,7 +84,7 @@ def clear_auth_cookies(response) -> None:
     common = dict(
         path="/",
         secure=settings.cookie_secure,
-        samesite=settings.cookie_samesite,
+        samesite=_normalize_samesite(settings.cookie_samesite),
     )
     if settings.cookie_domain:
         common["domain"] = settings.cookie_domain

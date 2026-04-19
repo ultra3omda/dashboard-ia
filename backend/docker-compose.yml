@@ -1,0 +1,17 @@
+# MongoDB local pour le développement.
+# Prérequis : Docker Desktop démarré sur Windows.
+# Commande : docker compose up -d
+# Puis dans .env : MONGO_URL=mongodb://localhost:27017
+
+services:
+  mongo:
+    image: mongo:7
+    container_name: cashflow-mongo
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    restart: unless-stopped
+
+volumes:
+  mongo_data:

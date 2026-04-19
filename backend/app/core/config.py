@@ -21,7 +21,10 @@ class Settings(BaseSettings):
     cookie_domain: str = Field(default="", alias="COOKIE_DOMAIN")
 
     # CORS
-    cors_origins: str = Field(default="http://localhost:5173", alias="CORS_ORIGINS")
+    cors_origins: str = Field(
+        default="http://localhost:5173,http://localhost:3000,http://127.0.0.1:3000",
+        alias="CORS_ORIGINS",
+    )
 
     # AI
     anthropic_api_key: str = Field(default="", alias="ANTHROPIC_API_KEY")
