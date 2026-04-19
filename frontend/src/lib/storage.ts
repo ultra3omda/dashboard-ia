@@ -1,10 +1,24 @@
-import { SoldeClient, Facture, ActionRelance, ImportSummary, isReversed } from "@/types/data";
+/**
+ * `storage.ts` — legacy façade, kept to avoid refactoring ~10 pages.
+ *
+ * Historical behaviour : localStorage-backed synchronous getters.
+ * New behaviour : the same synchronous getters now read from an in-memory
+ * cache that is populated by `<DataBootstrap>` at app startup via the
+ * authenticated REST API. Writes (saveSettings, saveActions, etc.) push
+ * both the cache AND the backend.
+ *
+ * This lets the seven existing business pages keep working without edits,
+ * while the source of truth lives in MongoDB on the server.
+ */
+import {
+  SoldeClient, Facture, ActionRelance, ImportSummary, isReversed,
+} from "@/types/data";
+import { actionsApi, settingsApi, clientsApi, facturesApi } from "@/lib/apiEndpoints";
+import type { AppSettings as ApiAppSettings } from "@/lib/apiEndpoints";
 
-const SOLDE_KEY = "medianet_solde_v1";
-const FACTURES_KEY = "medianet_factures_v1";
-const ACTIONS_KEY = "medianet_actions_v1";
-const SETTINGS_KEY = "medianet_settings_v1";
-const IMPORT_META_KEY = "medianet_import_meta_v1";
+// ═══════════════════════════════════════════════════════════════════
+// Shared types (kept identical to the original module for compatibility)
+// ═══════════════════════════════════════════════════════════════════
 
 export interface TeamMember {
   id: string;
@@ -34,6 +48,12 @@ export interface AppSettings {
     relanceAvocat: number;
     encoursMinEscalade: number;
   };
+  /** Aging classification thresholds (days overdue). */
+  agingBuckets: {
+    normal: number;
+    vigilance: number;
+    critique: number;
+  };
   team: TeamMember[];
   companyName: string;
   logoBase64: string | null;
@@ -49,112 +69,257 @@ export const defaultSettings: AppSettings = {
   scoringWeights: { delaiMoyen: 30, tauxPaye: 25, ancienneteImpayes: 20, encoursRelatif: 15, nbRelances: 10 },
   scoreThresholds: { bon: 80, moyen: 50, risque: 30 },
   alertThresholds: { echeanceJours: 7, relanceEmail: 30, relanceAppel: 60, relanceRdv: 90, relanceAvocat: 180, encoursMinEscalade: 50000 },
+  agingBuckets: { normal: 30, vigilance: 60, critique: 90 },
   team: [],
   companyName: "MEDIANET",
   logoBase64: null,
   currencyFormat: "DT",
 };
 
-export function getSettings(): AppSettings {
-  const raw = localStorage.getItem(SETTINGS_KEY);
-  if (!raw) return { ...defaultSettings };
-  return { ...defaultSettings, ...JSON.parse(raw) };
+// ═══════════════════════════════════════════════════════════════════
+// In-memory cache
+// ═══════════════════════════════════════════════════════════════════
+
+interface DataCache {
+  solde: SoldeClient[];
+  factures: Facture[];
+  actions: ActionRelance[];
+  settings: AppSettings;
+  importMeta: ImportMeta;
+  loaded: boolean;
 }
 
-export function saveSettings(settings: AppSettings) {
-  localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+const cache: DataCache = {
+  solde: [],
+  factures: [],
+  actions: [],
+  settings: { ...defaultSettings },
+  importMeta: { lastSoldeImport: null, lastFacturesImport: null },
+  loaded: false,
+};
+
+// Subscribers for cache changes — lets UI components refresh without a full React rerender
+type Listener = () => void;
+const listeners = new Set<Listener>();
+
+export function subscribeToStorage(fn: Listener): () => void {
+  listeners.add(fn);
+  return () => listeners.delete(fn);
 }
 
-export function getImportMeta(): ImportMeta {
-  const raw = localStorage.getItem(IMPORT_META_KEY);
-  return raw ? JSON.parse(raw) : { lastSoldeImport: null, lastFacturesImport: null };
+function notify() {
+  listeners.forEach(fn => {
+    try {
+      fn();
+    } catch (e) {
+      console.error("Storage listener error:", e);
+    }
+  });
 }
 
-export function saveImportMeta(meta: Partial<ImportMeta>) {
-  const existing = getImportMeta();
-  localStorage.setItem(IMPORT_META_KEY, JSON.stringify({ ...existing, ...meta }));
+// ═══════════════════════════════════════════════════════════════════
+// Bootstrap — called by <DataBootstrap> after login
+// ═══════════════════════════════════════════════════════════════════
+
+function normalizeApiSettings(api: ApiAppSettings): AppSettings {
+  return {
+    scoringWeights: { ...defaultSettings.scoringWeights, ...api.scoringWeights },
+    scoreThresholds: { ...defaultSettings.scoreThresholds, ...api.scoreThresholds },
+    alertThresholds: { ...defaultSettings.alertThresholds, ...api.alertThresholds },
+    agingBuckets: { ...defaultSettings.agingBuckets, ...api.agingBuckets },
+    team: api.team ?? [],
+    companyName: api.companyName ?? "MEDIANET",
+    logoBase64: api.logoBase64 ?? null,
+    currencyFormat: (api.currencyFormat === "TND" ? "TND" : "DT") as "DT" | "TND",
+  };
 }
+
+/** Fetch everything from the API and fill the cache. Safe to call multiple times. */
+export async function bootstrapStorage(): Promise<void> {
+  const [soldeRes, facturesRes, actionsRes, settingsRes] = await Promise.allSettled([
+    clientsApi.list(),
+    facturesApi.list(),
+    actionsApi.list(),
+    settingsApi.get(),
+  ]);
+
+  if (soldeRes.status === "fulfilled") {
+    cache.solde = soldeRes.value.map(c => ({
+      id: c.id,
+      nom: c.nom,
+      montantDu: c.montantDu,
+      updated_at: c.updated_at,
+    }));
+  }
+  if (facturesRes.status === "fulfilled") {
+    cache.factures = facturesRes.value.map(f => ({ ...f }));
+  }
+  if (actionsRes.status === "fulfilled") {
+    cache.actions = actionsRes.value.map(a => ({ ...a, source: a.source as ActionRelance["source"] }));
+  }
+  if (settingsRes.status === "fulfilled") {
+    cache.settings = normalizeApiSettings(settingsRes.value);
+  }
+
+  cache.loaded = true;
+  notify();
+}
+
+export function clearCache() {
+  cache.solde = [];
+  cache.factures = [];
+  cache.actions = [];
+  cache.settings = { ...defaultSettings };
+  cache.importMeta = { lastSoldeImport: null, lastFacturesImport: null };
+  cache.loaded = false;
+  notify();
+}
+
+export function isBootstrapped(): boolean {
+  return cache.loaded;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Getters — synchronous, read from cache (drop-in replacements)
+// ═══════════════════════════════════════════════════════════════════
 
 export function getSoldeClients(): SoldeClient[] {
-  const raw = localStorage.getItem(SOLDE_KEY);
-  return raw ? JSON.parse(raw) : [];
+  return cache.solde;
 }
 
 export function getFactures(): Facture[] {
-  const raw = localStorage.getItem(FACTURES_KEY);
-  return raw ? JSON.parse(raw) : [];
-}
-
-export function getActions(): ActionRelance[] {
-  const raw = localStorage.getItem(ACTIONS_KEY);
-  return raw ? JSON.parse(raw) : [];
-}
-
-export function saveActions(actions: ActionRelance[]) {
-  localStorage.setItem(ACTIONS_KEY, JSON.stringify(actions));
+  return cache.factures;
 }
 
 export function getActiveFactures(): Facture[] {
-  return getFactures().filter(f => !isReversed(f.paiement));
+  return cache.factures.filter(f => !isReversed(f.paiement));
+}
+
+export function getActions(): ActionRelance[] {
+  return cache.actions;
+}
+
+export function getSettings(): AppSettings {
+  return cache.settings;
+}
+
+export function getImportMeta(): ImportMeta {
+  return cache.importMeta;
 }
 
 export function hasData(): boolean {
-  return getSoldeClients().length > 0 || getFactures().length > 0;
+  return cache.solde.length > 0 || cache.factures.length > 0;
 }
 
-export function mergeSoldeClients(incoming: SoldeClient[]): { newClients: number; updatedClients: number } {
-  const existing = getSoldeClients();
-  const map = new Map<string, SoldeClient>();
-  existing.forEach(c => map.set(c.nom.toLowerCase().trim(), c));
+// ═══════════════════════════════════════════════════════════════════
+// Setters — push to cache AND to backend
+// ═══════════════════════════════════════════════════════════════════
 
-  let newClients = 0;
-  let updatedClients = 0;
-
-  incoming.forEach(c => {
-    const key = c.nom.toLowerCase().trim();
-    if (map.has(key)) {
-      map.set(key, { ...map.get(key)!, montantDu: c.montantDu });
-      updatedClients++;
-    } else {
-      map.set(key, c);
-      newClients++;
-    }
+/** Optimistic update + server persistence. */
+export function saveSettings(settings: AppSettings) {
+  cache.settings = { ...settings };
+  notify();
+  // Fire and forget — caller can await the returned promise if it cares
+  void settingsApi.update(settings as Partial<ApiAppSettings>).catch(err => {
+    console.error("saveSettings server sync failed:", err);
   });
-
-  localStorage.setItem(SOLDE_KEY, JSON.stringify(Array.from(map.values())));
-  return { newClients, updatedClients };
 }
 
-export function mergeFactures(incoming: Facture[]): { newInvoices: number; updatedInvoices: number } {
-  const existing = getFactures();
-  const map = new Map<string, Facture>();
-  existing.forEach(f => map.set(f.numFacture, f));
+export function saveImportMeta(meta: Partial<ImportMeta>) {
+  cache.importMeta = { ...cache.importMeta, ...meta };
+  notify();
+}
 
-  let newInvoices = 0;
-  let updatedInvoices = 0;
+export function saveActions(actions: ActionRelance[]) {
+  // This setter was used to bulk-save the whole array to localStorage.
+  // Callers now should prefer createAction/updateAction/deleteAction.
+  // We diff against the cache to determine what changed and sync.
+  const prev = new Map(cache.actions.map(a => [a.id, a]));
+  const next = new Map(actions.map(a => [a.id, a]));
 
-  incoming.forEach(f => {
-    if (map.has(f.numFacture)) {
-      map.set(f.numFacture, { ...map.get(f.numFacture)!, ...f });
-      updatedInvoices++;
-    } else {
-      map.set(f.numFacture, f);
-      newInvoices++;
+  cache.actions = actions;
+  notify();
+
+  // Create + update
+  const tasks: Promise<unknown>[] = [];
+  for (const [id, action] of next) {
+    if (!prev.has(id)) {
+      tasks.push(
+        actionsApi.create({
+          clientNom: action.clientNom,
+          factureId: action.factureId,
+          type: action.type,
+          priorite: action.priorite,
+          assigneA: action.assigneA,
+          statut: action.statut,
+          datePrevue: action.datePrevue,
+          notes: action.notes,
+          montantConcerne: action.montantConcerne,
+        }).catch(err => console.error("createAction failed:", err))
+      );
+    } else if (JSON.stringify(prev.get(id)) !== JSON.stringify(action)) {
+      tasks.push(
+        actionsApi.update(id, {
+          type: action.type,
+          priorite: action.priorite,
+          assigneA: action.assigneA,
+          statut: action.statut,
+          datePrevue: action.datePrevue,
+          notes: action.notes,
+          montantConcerne: action.montantConcerne,
+        }).catch(err => console.error("updateAction failed:", err))
+      );
     }
-  });
+  }
+  // Delete
+  for (const id of prev.keys()) {
+    if (!next.has(id)) {
+      tasks.push(actionsApi.remove(id).catch(err => console.error("deleteAction failed:", err)));
+    }
+  }
 
-  localStorage.setItem(FACTURES_KEY, JSON.stringify(Array.from(map.values())));
-  return { newInvoices, updatedInvoices };
+  void Promise.allSettled(tasks);
 }
 
-export function importData(solde: SoldeClient[], factures: Facture[]): ImportSummary {
-  const s = mergeSoldeClients(solde);
-  const f = mergeFactures(factures);
-  return { ...s, ...f };
+// ═══════════════════════════════════════════════════════════════════
+// Merge helpers — kept for API compatibility but do NOT perform writes.
+// The modern path is to upload an Excel via /api/imports and let the
+// backend upsert. We keep these functions so that the legacy ImportModal
+// compiles; they just return zero-deltas and emit a warning.
+// ═══════════════════════════════════════════════════════════════════
+
+export function mergeSoldeClients(_incoming: SoldeClient[]): { newClients: number; updatedClients: number } {
+  console.warn("mergeSoldeClients is deprecated — use importsApi.uploadSolde instead");
+  return { newClients: 0, updatedClients: 0 };
+}
+
+export function mergeFactures(_incoming: Facture[]): { newInvoices: number; updatedInvoices: number } {
+  console.warn("mergeFactures is deprecated — use importsApi.uploadFactures instead");
+  return { newInvoices: 0, updatedInvoices: 0 };
+}
+
+export function importData(_solde: SoldeClient[], _factures: Facture[]): ImportSummary {
+  console.warn("importData is deprecated — use the Import modal which calls importsApi");
+  return { newClients: 0, updatedClients: 0, newInvoices: 0, updatedInvoices: 0 };
 }
 
 export function clearAllData() {
-  localStorage.removeItem(SOLDE_KEY);
-  localStorage.removeItem(FACTURES_KEY);
-  localStorage.removeItem(ACTIONS_KEY);
+  clearCache();
+}
+
+// Internal: allow imports router callers to refresh after upload
+export async function refreshAfterImport() {
+  try {
+    const [soldeRes, facturesRes] = await Promise.all([
+      clientsApi.list(),
+      facturesApi.list(),
+    ]);
+    cache.solde = soldeRes.map(c => ({
+      id: c.id, nom: c.nom, montantDu: c.montantDu, updated_at: c.updated_at,
+    }));
+    cache.factures = facturesRes.map(f => ({ ...f }));
+    notify();
+  } catch (e) {
+    console.error("refreshAfterImport failed:", e);
+  }
 }

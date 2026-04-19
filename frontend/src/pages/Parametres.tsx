@@ -19,10 +19,12 @@ import { mergeSoldeClients, mergeFactures } from "@/lib/storage";
 import ImportModal from "@/components/ImportModal";
 import {
   Upload, Trash2, Database, Download, Settings2, Users, Palette,
-  FileSpreadsheet, Check, AlertCircle, Plus, X, Shield, Bell, ImageIcon
+  FileSpreadsheet, Check, AlertCircle, Plus, X, Shield, Bell, ImageIcon,
+  CloudUpload, Loader2,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { toast } from "sonner";
+import { hasLocalData, countLocalData, migrateLocalToCloud } from "@/lib/localMigration";
 
 export default function Parametres({ onDataChange }: { onDataChange: () => void }) {
   const [settings, setSettings] = useState<AppSettings>(getSettings());
@@ -35,6 +37,35 @@ export default function Parametres({ onDataChange }: { onDataChange: () => void 
   const [newMember, setNewMember] = useState({ name: "", role: "", email: "" });
 
   const logoInputRef = useRef<HTMLInputElement>(null);
+
+  // --- Cloud migration (one-shot, for users upgrading from the localStorage version) ---
+  const [localCounts] = useState(() => (hasLocalData() ? countLocalData() : null));
+  const [migrating, setMigrating] = useState(false);
+  const [migrationDone, setMigrationDone] = useState(false);
+
+  const runMigration = async () => {
+    setMigrating(true);
+    try {
+      const res = await migrateLocalToCloud();
+      if (res.errors.length > 0) {
+        toast.error("Migration partielle", { description: res.errors.join(" · ") });
+      } else {
+        const bits: string[] = [];
+        if (res.soldeImported) bits.push(`${res.soldeImported.total} clients`);
+        if (res.facturesImported) bits.push(`${res.facturesImported.total} factures`);
+        toast.success("Migration réussie", {
+          description: bits.length > 0 ? bits.join(" · ") : "Aucune donnée à migrer",
+        });
+        setMigrationDone(true);
+        onDataChange();
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Erreur inconnue";
+      toast.error("Migration échouée", { description: msg });
+    } finally {
+      setMigrating(false);
+    }
+  };
 
   const persist = (updated: AppSettings) => {
     setSettings(updated);
@@ -92,6 +123,12 @@ export default function Parametres({ onDataChange }: { onDataChange: () => void 
     persist({ ...settings, alertThresholds: { ...settings.alertThresholds, [key]: v } });
   };
 
+  // --- Section 3bis: Aging buckets ---
+  const updateAgingBucket = (key: keyof AppSettings["agingBuckets"], value: string) => {
+    const v = parseInt(value) || 0;
+    persist({ ...settings, agingBuckets: { ...settings.agingBuckets, [key]: v } });
+  };
+
   // --- Section 4: Team ---
   const addMember = () => {
     if (!newMember.name.trim()) return;
@@ -135,6 +172,52 @@ export default function Parametres({ onDataChange }: { onDataChange: () => void 
   return (
     <div className="p-6 space-y-6 animate-fade-in">
       <h2 className="text-2xl font-bold text-foreground">Paramètres</h2>
+
+      {/* MIGRATION BLOCK — shown only if legacy localStorage data is present */}
+      {localCounts && !migrationDone && (
+        <Card className="shadow-sm border-sky-300 bg-sky-50/50">
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2 text-sky-900">
+              <CloudUpload className="h-4 w-4" />
+              Migrer vos données locales vers le cloud
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <p className="text-sm text-sky-900/80">
+              Nous avons détecté des données stockées localement dans votre navigateur
+              (version précédente de l'application). Migrez-les en un clic vers le
+              serveur pour qu'elles soient partagées avec votre équipe, sauvegardées et
+              disponibles depuis n'importe quel navigateur.
+            </p>
+            <div className="flex items-center gap-4 text-sm">
+              <div className="flex items-center gap-2">
+                <Badge variant="outline" className="bg-white">
+                  {localCounts.clients} clients
+                </Badge>
+                <Badge variant="outline" className="bg-white">
+                  {localCounts.factures} factures
+                </Badge>
+              </div>
+              <Button
+                onClick={runMigration}
+                disabled={migrating}
+                size="sm"
+                className="ml-auto"
+              >
+                {migrating ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <CloudUpload className="h-4 w-4 mr-2" />
+                )}
+                {migrating ? "Migration en cours…" : "Migrer maintenant"}
+              </Button>
+            </div>
+            <p className="text-xs text-sky-900/70">
+              Les données locales seront supprimées après migration réussie.
+            </p>
+          </CardContent>
+        </Card>
+      )}
 
       {/* SECTION 1 — Import / Export */}
       <Card className="shadow-sm">
@@ -276,6 +359,63 @@ export default function Parametres({ onDataChange }: { onDataChange: () => void 
               </div>
             ))}
           </div>
+        </CardContent>
+      </Card>
+
+      {/* SECTION 3bis — Aging buckets (used by Analyse IA) */}
+      <Card className="shadow-sm">
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <AlertCircle className="h-4 w-4" />
+            Seuils de criticité des retards
+          </CardTitle>
+          <p className="text-xs text-muted-foreground mt-1">
+            Classement utilisé dans la page Analyse IA : Normal → Vigilance → Critique → Danger.
+            Les valeurs sont des bornes supérieures, en jours de retard.
+          </p>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="space-y-1">
+              <Label className="text-xs text-muted-foreground">Normal (jusqu'à)</Label>
+              <div className="flex items-center gap-2">
+                <Input
+                  type="number"
+                  className="h-8 text-sm"
+                  value={settings.agingBuckets.normal}
+                  onChange={e => updateAgingBucket("normal", e.target.value)}
+                />
+                <span className="text-xs text-muted-foreground shrink-0">j</span>
+              </div>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs text-muted-foreground">Vigilance (jusqu'à)</Label>
+              <div className="flex items-center gap-2">
+                <Input
+                  type="number"
+                  className="h-8 text-sm"
+                  value={settings.agingBuckets.vigilance}
+                  onChange={e => updateAgingBucket("vigilance", e.target.value)}
+                />
+                <span className="text-xs text-muted-foreground shrink-0">j</span>
+              </div>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs text-muted-foreground">Critique (jusqu'à)</Label>
+              <div className="flex items-center gap-2">
+                <Input
+                  type="number"
+                  className="h-8 text-sm"
+                  value={settings.agingBuckets.critique}
+                  onChange={e => updateAgingBucket("critique", e.target.value)}
+                />
+                <span className="text-xs text-muted-foreground shrink-0">j</span>
+              </div>
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground mt-3">
+            <span className="font-semibold text-red-600">Danger</span> = tout retard &gt; {settings.agingBuckets.critique} j
+          </p>
         </CardContent>
       </Card>
 

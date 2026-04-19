@@ -1,9 +1,15 @@
 export interface SoldeClient {
+  /** Server-assigned ID. Absent on legacy localStorage data. */
+  id?: string;
   nom: string;
   montantDu: number;
+  /** ISO timestamp set by the backend on last update. */
+  updated_at?: string;
 }
 
 export interface Facture {
+  /** Server-assigned ID. Absent on legacy localStorage data. */
+  id?: string;
   nomClient: string;
   activite: string;
   numFacture: string;
